@@ -77,6 +77,7 @@ jobs:
       - name: Run ORT Analyzer
         run: |
           mkdir -p ort-results
+          chmod a+w ort-results
           docker run --rm \
             -v "$GITHUB_WORKSPACE":/project \
             -v "$GITHUB_WORKSPACE/ort-results":/results \
