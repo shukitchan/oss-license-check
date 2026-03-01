@@ -84,7 +84,8 @@ jobs:
             ghcr.io/oss-review-toolkit/ort:${{ env.ORT_VERSION }} \
               --info analyze \
               -i /project \
-              -o /results
+              -o /results \
+            || { rc=$?; [ $rc -eq 2 ] || exit $rc; }
 
       # ── ORT Scanner: run ScanCode on the source tree to detect licenses ──────
       - name: Run ORT Scanner with ScanCode
@@ -95,13 +96,15 @@ jobs:
               --info scan \
               -i /results/analyzer-result.yml \
               -o /results \
-              -s ScanCode
+              -s ScanCode \
+            || { rc=$?; [ $rc -eq 2 ] || exit $rc; }
 
       # ── ORT Reporter: produce human-readable and machine-readable reports ────
       - name: Run ORT Reporter
         if: always()
         run: |
           mkdir -p ort-results/reports
+          chmod a+w ort-results/reports
 
           # Prefer the richer scan result; fall back to the analyzer result only.
           if [ -f ort-results/scan-result.yml ]; then
