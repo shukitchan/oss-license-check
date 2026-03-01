@@ -83,8 +83,7 @@ jobs:
             ghcr.io/oss-review-toolkit/ort:${{ env.ORT_VERSION }} \
               --info analyze \
               -i /project \
-              -o /results \
-              -P ort.analyzer.allowDynamicVersions=true
+              -o /results
 
       # ── ORT Scanner: run ScanCode on the source tree to detect licenses ──────
       - name: Run ORT Scanner with ScanCode
