@@ -1,0 +1,175 @@
+name: Weekly OSS License Scan
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Every Sunday at 00:00 UTC
+  workflow_dispatch:       # Allow manual triggering
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  # Pin to a specific ORT release tag for reproducibility, e.g. "25.0.0"
+  ORT_VERSION: latest
+
+jobs:
+  # ── Job 1: enumerate all repositories owned by the authenticated user ────────
+  list-repos:
+    name: List Repositories
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.get-repos.outputs.matrix }}
+    steps:
+      - name: Fetch all owned repositories
+        id: get-repos
+        uses: actions/github-script@v7
+        with:
+          # Use the built-in GITHUB_TOKEN to list repos — no extra secret required.
+          # listForUser returns all public repos for the owner. To include private
+          # repos in the listing, replace github.token with secrets.GH_PAT and swap
+          # listForUser for listForAuthenticatedUser (with visibility:'all').
+          github-token: ${{ github.token }}
+          script: |
+            const repos = await github.paginate(
+              github.rest.repos.listForUser,
+              { username: context.repo.owner, type: 'owner', per_page: 100 }
+            );
+
+            // Exclude archived repos and forks.
+            // GitHub Actions enforces a hard limit of 256 jobs per matrix
+            // (see https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/running-variations-of-jobs-in-a-workflow#about-matrix-strategies).
+            // Exceeding that limit causes the workflow to fail at queue time, so
+            // we cap the list at 256 entries. If you own more than 256 repos and
+            // want to scan them all, split this workflow into multiple runs (e.g.
+            // by paginating with an offset env var, or by filtering on repo topics/
+            // language) and schedule each run at a different time.
+            const include = repos
+              .filter(r => !r.archived && !r.fork)
+              .slice(0, 256)
+              .map(r => ({ name: r.name, full_name: r.full_name }));
+
+            core.setOutput('matrix', JSON.stringify({ include }));
+            core.notice(
+              `Scheduling ${include.length} of ${repos.length} repositories for scanning`
+            );
+
+  # ── Job 2: scan each repository (ORT Analyzer → ORT Scanner/ScanCode → Reporter) ─
+  scan:
+    name: Scan ${{ matrix.name }}
+    needs: list-repos
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.list-repos.outputs.matrix) }}
+      fail-fast: false
+      max-parallel: 5
+    steps:
+      - name: Checkout ${{ matrix.full_name }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.full_name }}
+          # Fall back to github.token for public repositories so GH_PAT is only
+          # required when private repository access is needed.
+          token: ${{ secrets.GH_PAT || github.token }}
+          fetch-depth: 1
+
+      # ── ORT Analyzer: resolve all package manager dependencies ───────────────
+      - name: Run ORT Analyzer
+        run: |
+          mkdir -p ort-results
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE":/project \
+            -v "$GITHUB_WORKSPACE/ort-results":/results \
+            ghcr.io/oss-review-toolkit/ort:${{ env.ORT_VERSION }} \
+              --info analyze \
+              -i /project \
+              -o /results \
+              --allow-dynamic-versions
+
+      # ── ORT Scanner: run ScanCode on the source tree to detect licenses ──────
+      - name: Run ORT Scanner with ScanCode
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE/ort-results":/results \
+            ghcr.io/oss-review-toolkit/ort:${{ env.ORT_VERSION }} \
+              --info scan \
+              -i /results/analyzer-result.yml \
+              -o /results \
+              -s ScanCode
+
+      # ── ORT Reporter: produce human-readable and machine-readable reports ────
+      - name: Run ORT Reporter
+        if: always()
+        run: |
+          mkdir -p ort-results/reports
+
+          # Prefer the richer scan result; fall back to the analyzer result only.
+          if [ -f ort-results/scan-result.yml ]; then
+            input_file=/results/scan-result.yml
+          elif [ -f ort-results/analyzer-result.yml ]; then
+            input_file=/results/analyzer-result.yml
+          else
+            echo "No ORT result file found — skipping reporter."
+            exit 0
+          fi
+
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE/ort-results":/results \
+            ghcr.io/oss-review-toolkit/ort:${{ env.ORT_VERSION }} \
+              --info report \
+              -i "$input_file" \
+              -o /results/reports \
+              -f StaticHtml,SpdxDocument,CycloneDx
+
+      # ── Upload per-repo artifacts ─────────────────────────────────────────────
+      - name: Upload ORT results for ${{ matrix.name }}
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ort-results-${{ matrix.name }}
+          path: ort-results/
+          retention-days: 90
+
+  # ── Job 3: aggregate all results into a single summary ───────────────────────
+  summarize:
+    name: Generate License Summary
+    needs: scan
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download all scan artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ort-results-*
+          path: all-ort-results
+
+      - name: Write summary to workflow output
+        run: |
+          {
+            echo "# 📦 Weekly OSS License Scan Results"
+            echo ""
+            echo "**Scan Date:** $(date -u +'%Y-%m-%d %H:%M UTC')"
+            echo "**Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            echo ""
+            echo "| Repository | Analyzer | Scanner | Reports |"
+            echo "| --- | :---: | :---: | :---: |"
+
+            for dir in all-ort-results/ort-results-*/; do
+              repo="${dir#all-ort-results/ort-results-}"
+              repo="${repo%/}"
+              analyzer_ok="❌"
+              scanner_ok="❌"
+              reports_ok="❌"
+              [ -f "$dir/analyzer-result.yml" ] && analyzer_ok="✅"
+              [ -f "$dir/scan-result.yml"      ] && scanner_ok="✅"
+              [ -d "$dir/reports"              ] && reports_ok="✅"
+              echo "| \`$repo\` | $analyzer_ok | $scanner_ok | $reports_ok |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload combined license reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-license-reports-${{ github.run_id }}
+          path: all-ort-results/
+          retention-days: 90
