@@ -36,7 +36,14 @@ jobs:
               { username: context.repo.owner, type: 'owner', per_page: 100 }
             );
 
-            // Exclude archived repos and forks; respect the 256-item matrix cap.
+            // Exclude archived repos and forks.
+            // GitHub Actions enforces a hard limit of 256 jobs per matrix
+            // (see https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/running-variations-of-jobs-in-a-workflow#about-matrix-strategies).
+            // Exceeding that limit causes the workflow to fail at queue time, so
+            // we cap the list at 256 entries. If you own more than 256 repos and
+            // want to scan them all, split this workflow into multiple runs (e.g.
+            // by paginating with an offset env var, or by filtering on repo topics/
+            // language) and schedule each run at a different time.
             const include = repos
               .filter(r => !r.archived && !r.fork)
               .slice(0, 256)
