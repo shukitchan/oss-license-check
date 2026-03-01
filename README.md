@@ -25,18 +25,16 @@ The workflow (`weekly-license-scan.yml`) is made up of three jobs:
 
 | Requirement | Details |
 |---|---|
-| **`GH_PAT` secret** *(private repos only)* | A [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) with the **`repo`** scope. Required only to clone private repositories during the analyze step. Add it under **Settings → Secrets and variables → Actions → New repository secret**. If all your repositories are public this secret is not needed. |
+| **`GH_PAT` secret** | A [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) with the **`repo`** scope. Required to enumerate all repositories (public and private) owned by the authenticated user and to clone private repositories during the analyze step. Add it under **Settings → Secrets and variables → Actions → New repository secret**. |
 | **Docker** | The runner uses `ghcr.io/oss-review-toolkit/ort` Docker image. `ubuntu-latest` GitHub-hosted runners include Docker by default. |
 
 ## Setup
 
 1. Fork or copy this repository into your GitHub account.
-2. The workflow uses the built-in `GITHUB_TOKEN` to list repositories via the GitHub API — no
-   extra configuration is needed for public repositories.
-3. *(Optional – private repos)* Create a Personal Access Token (PAT) with the `repo` scope and
-   add it as a repository secret named **`GH_PAT`**. The analyze step will use this token to clone
-   private repositories.
-4. The workflow runs automatically every Sunday at 00:00 UTC, or you can trigger it manually
+2. Create a Personal Access Token (PAT) with the `repo` scope and add it as a repository secret
+   named **`GH_PAT`**. This token is used to enumerate all your repositories (including private
+   ones) and to clone private repositories during the analyze step.
+3. The workflow runs automatically every Sunday at 00:00 UTC, or you can trigger it manually
    via **Actions → Weekly OSS License Scan → Run workflow**.
 
 ## Configuration
