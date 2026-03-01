@@ -84,7 +84,7 @@ jobs:
               --info analyze \
               -i /project \
               -o /results \
-              --allow-dynamic-versions
+              -P ort.analyzer.allowDynamicVersions=true
 
       # ── ORT Scanner: run ScanCode on the source tree to detect licenses ──────
       - name: Run ORT Scanner with ScanCode
