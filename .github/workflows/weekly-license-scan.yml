@@ -85,8 +85,9 @@ jobs:
             -v "$GITHUB_WORKSPACE":/project \
             -v "$GITHUB_WORKSPACE/ort-results":/results \
             ghcr.io/oss-review-toolkit/ort:${{ env.ORT_VERSION }} \
-              --info analyze \
-              --allow-dynamic-versions \
+              --info \
+              -P ort.analyzer.allowDynamicVersions=true \
+              analyze \
               -i /project \
               -o /results
 
