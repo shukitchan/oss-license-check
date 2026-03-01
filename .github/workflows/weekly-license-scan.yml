@@ -78,6 +78,9 @@ jobs:
         run: |
           mkdir -p ort-results
           chmod a+w ort-results
+          # Make workspace directories writable so ORT can create lock files
+          # (e.g. Cargo.lock) inside the project tree when they don't exist yet.
+          chmod -R a+w "$GITHUB_WORKSPACE"
           docker run --rm \
             -v "$GITHUB_WORKSPACE":/project \
             -v "$GITHUB_WORKSPACE/ort-results":/results \
