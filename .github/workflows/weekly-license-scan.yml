@@ -76,13 +76,24 @@ jobs:
       # ── ORT Analyzer: resolve all package manager dependencies ───────────────
       - name: Run ORT Analyzer
         run: |
-          mkdir -p ort-results
+          mkdir -p ort-results ort-config
           chmod a+w ort-results
+          # Make workspace directories writable so ORT can create lock files
+          # (e.g. Cargo.lock) inside the project tree when they don't exist yet.
+          chmod -R a+w "$GITHUB_WORKSPACE"
+          # Write a minimal ORT config that enables dynamic version resolution.
+          # Using a config file with -c is more portable than CLI flags like
+          # --allow-dynamic-versions (removed) or -P (added later).
+          printf 'ort:\n  analyzer:\n    allowDynamicVersions: true\n' \
+            > ort-config/ort.yml
           docker run --rm \
             -v "$GITHUB_WORKSPACE":/project \
             -v "$GITHUB_WORKSPACE/ort-results":/results \
+            -v "$GITHUB_WORKSPACE/ort-config":/ort-config:ro \
             ghcr.io/oss-review-toolkit/ort:${{ env.ORT_VERSION }} \
-              --info analyze \
+              --info \
+              -c /ort-config/ort.yml \
+              analyze \
               -i /project \
               -o /results
 
@@ -102,6 +113,7 @@ jobs:
         if: always()
         run: |
           mkdir -p ort-results/reports
+          chmod a+w ort-results/reports
 
           # Prefer the richer scan result; fall back to the analyzer result only.
           if [ -f ort-results/scan-result.yml ]; then
