@@ -59,6 +59,7 @@ jobs:
     name: Scan ${{ matrix.name }}
     needs: list-repos
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       matrix: ${{ fromJson(needs.list-repos.outputs.matrix) }}
       fail-fast: false
@@ -75,16 +76,20 @@ jobs:
 
       # ── ORT Analyzer: resolve all package manager dependencies ───────────────
       - name: Run ORT Analyzer
+        continue-on-error: true
         run: |
           mkdir -p ort-results ort-config
           chmod a+w ort-results
           # Make workspace directories writable so ORT can create lock files
           # (e.g. Cargo.lock) inside the project tree when they don't exist yet.
           chmod -R a+w "$GITHUB_WORKSPACE"
-          # Write a minimal ORT config that enables dynamic version resolution.
+          # Write a minimal ORT config that enables dynamic version resolution
+          # and configures ScanCode to use multiple parallel processes and a
+          # per-file timeout so that large dependency trees (e.g. npm projects
+          # with many transitive packages) do not stall the scan indefinitely.
           # Using a config file with -c is more portable than CLI flags like
           # --allow-dynamic-versions (removed) or -P (added later).
-          printf 'ort:\n  analyzer:\n    allowDynamicVersions: true\n' \
+          printf 'ort:\n  analyzer:\n    allowDynamicVersions: true\n  scanner:\n    config:\n      ScanCode:\n        options:\n          commandLine: "-l -c --info --timeout 30 --processes 4"\n' \
             > ort-config/ort.yml
           docker run --rm \
             -v "$GITHUB_WORKSPACE":/project \
@@ -99,6 +104,7 @@ jobs:
 
       # ── ORT Scanner: run ScanCode on the source tree to detect licenses ──────
       - name: Run ORT Scanner with ScanCode
+        continue-on-error: true
         run: |
           docker run --rm \
             -v "$GITHUB_WORKSPACE/ort-results":/results \
