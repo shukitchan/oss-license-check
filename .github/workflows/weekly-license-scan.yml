@@ -83,7 +83,7 @@ jobs:
           report-formats: 'StaticHtml,SpdxDocument,CycloneDx'
           # Run only analyzer and reporter; skip scanner, evaluator, advisor,
           # and the built-in upload-results so we control the artifact name below.
-          run: 'cache-dependencies, analyzer, reporter'
+          run: 'analyzer, reporter'
 
       # ── Upload per-repo artifacts ─────────────────────────────────────────────
       - name: Upload ORT results for ${{ matrix.name }}
