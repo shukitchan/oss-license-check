@@ -9,10 +9,6 @@ permissions:
   contents: read
   issues: write
 
-env:
-  # Pin to a specific ORT release tag for reproducibility, e.g. "25.0.0"
-  ORT_VERSION: latest
-
 jobs:
   # ── Job 1: enumerate all repositories owned by the authenticated user ────────
   list-repos:
@@ -54,7 +50,7 @@ jobs:
               `Scheduling ${include.length} of ${repos.length} repositories for scanning`
             );
 
-  # ── Job 2: analyze each repository (ORT Analyzer → Reporter) ───────────────
+  # ── Job 2: analyze each repository via the official ORT GitHub Action ────────
   analyze:
     name: Scan ${{ matrix.name }}
     needs: list-repos
@@ -74,50 +70,20 @@ jobs:
           token: ${{ secrets.GH_PAT || github.token }}
           fetch-depth: 1
 
-      # ── ORT Analyzer: resolve all package manager dependencies ───────────────
-      - name: Run ORT Analyzer
+      # ── ORT Analyzer + Reporter via the official ORT CI GitHub Action ─────────
+      # Pinned to v1.1.0 (latest stable tag as of 2025-02).
+      # TODO: update pin when a newer stable tag is released
+      # (see https://github.com/oss-review-toolkit/ort-ci-github-action/tags).
+      - name: Run GitHub Action for ORT
+        id: ort
         continue-on-error: true
-        run: |
-          mkdir -p ort-results ort-config
-          chmod a+w ort-results
-          # Make workspace directories writable so ORT can create lock files
-          # (e.g. Cargo.lock) inside the project tree when they don't exist yet.
-          chmod -R a+w "$GITHUB_WORKSPACE"
-          # Write a minimal ORT config that enables dynamic version resolution.
-          # Using a config file with -c is more portable than CLI flags like
-          # --allow-dynamic-versions (removed) or -P (added later).
-          printf 'ort:\n  analyzer:\n    allowDynamicVersions: true\n' \
-            > ort-config/ort.yml
-          docker run --rm \
-            -v "$GITHUB_WORKSPACE":/project \
-            -v "$GITHUB_WORKSPACE/ort-results":/results \
-            -v "$GITHUB_WORKSPACE/ort-config":/ort-config:ro \
-            ghcr.io/oss-review-toolkit/ort:${{ env.ORT_VERSION }} \
-              --info \
-              -c /ort-config/ort.yml \
-              analyze \
-              -i /project \
-              -o /results
-
-      # ── ORT Reporter: produce human-readable and machine-readable reports ────
-      - name: Run ORT Reporter
-        if: always()
-        run: |
-          mkdir -p ort-results/reports
-          chmod a+w ort-results/reports
-
-          if [ ! -f ort-results/analyzer-result.yml ]; then
-            echo "No ORT analyzer result file found — skipping reporter."
-            exit 0
-          fi
-
-          docker run --rm \
-            -v "$GITHUB_WORKSPACE/ort-results":/results \
-            ghcr.io/oss-review-toolkit/ort:${{ env.ORT_VERSION }} \
-              --info report \
-              -i /results/analyzer-result.yml \
-              -o /results/reports \
-              -f StaticHtml,SpdxDocument,CycloneDx
+        uses: oss-review-toolkit/ort-ci-github-action@v1.1.0
+        with:
+          allow-dynamic-versions: 'true'
+          report-formats: 'StaticHtml,SpdxDocument,CycloneDx'
+          # Run only analyzer and reporter; skip scanner, evaluator, advisor,
+          # and the built-in upload-results so we control the artifact name below.
+          run: 'cache-dependencies, analyzer, reporter'
 
       # ── Upload per-repo artifacts ─────────────────────────────────────────────
       - name: Upload ORT results for ${{ matrix.name }}
@@ -125,7 +91,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ort-results-${{ matrix.name }}
-          path: ort-results/
+          path: ${{ steps.ort.outputs.results-path }}
           retention-days: 90
 
   # ── Job 3: aggregate all results into a single summary ───────────────────────
@@ -157,8 +123,8 @@ jobs:
               repo="${repo%/}"
               analyzer_ok="❌"
               reports_ok="❌"
-              [ -f "$dir/analyzer-result.yml" ] && analyzer_ok="✅"
-              [ -d "$dir/reports"              ] && reports_ok="✅"
+              [ -f "$dir/analyzer-result.json" ] && analyzer_ok="✅"
+              [ -f "$dir/scan-report.html"      ] && reports_ok="✅"
               echo "| \`$repo\` | $analyzer_ok | $reports_ok |"
             done
           } >> "$GITHUB_STEP_SUMMARY"
